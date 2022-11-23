@@ -1,9 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <assert.h>
-#include <math.h>
-#include <mpi.h>
 #include "../include/imagen.h"
+
 
 struct Pixel{
 
@@ -208,79 +207,24 @@ void suavizar_pixel(int x,int y ,int ancho , int alto,RGB *imagen_aux,RGB *image
 
 }
 
-void suavizar(int ancho, int alto, RGB *imagen, int idProceso, int numProcesos, MPI_Datatype typeRGB)
+void suavizar(int ancho, int alto, RGB *imagen)
 {
-	// imagen auxiliar
-	RGB *imagen_auxiliar = (RGB *)malloc(alto * ancho * sizeof(RGB));
+	//? Obtenemos todos los valores adyacentes al pixel actual y hacemos una media de estos (mean-filter)
 
-	// filas asignadas a cada proceso
-	int processRows = floor(alto / numProcesos);
+	RGB *imagen_auxiliar = (RGB *) malloc(size*sizeof(RGB));
 
-	// buffer en el que almacenaremos las secciones del array
-	// el tamÃ±ao sera igual a las filas asignadas a cada proceso
-	RGB *bufferRGB = (RGB *)malloc(processRows * ancho * sizeof(RGB));
+	for(int i=0;i<size;i++){
 
-	//el proceso master crea la copia y la pasa a los hijos
-	if (idProceso == 0)
-	{
-		
-		for (int i = 0; i < alto * ancho; i++)
-		{
-			imagen_auxiliar[i].r = imagen[i].r;
-			imagen_auxiliar[i].g = imagen[i].g;
-			imagen_auxiliar[i].b = imagen[i].b;
-		}
-		MPI_Bcast(imagen_auxiliar, ancho * alto, typeRGB, 0, MPI_COMM_WORLD);
-	}
-	else
-	{
-		MPI_Bcast(imagen_auxiliar, ancho * alto, typeRGB, 0, MPI_COMM_WORLD);
+		imagen_auxiliar[i].r=imagen[i].r;
+		imagen_auxiliar[i].g=imagen[i].g;
+		imagen_auxiliar[i].b=imagen[i].b;
 	}
 
-	MPI_Status status;
-
-	//Calculamos la ultima fila que le toca al proceso actual en funcion de su identificador
-	int ultimaFIla = (idProceso * processRows) + processRows;
-
-	//Cada uno suaviza su seccion concreta
-	for (int i = idProceso * processRows; i < ultimaFIla; i++)
-	{
-		for (int j = 0; j < ancho; j++)
-		{
-			suavizar_pixel(i, j, ancho, alto, imagen_auxiliar, imagen);
+	#pragma omp parallel for collapse(2)
+	for(int i=0;i<alto;i++){
+		for(int j=0;j<ancho;j++){
+			suavizar_pixel(i,j,ancho,alto,imagen_auxiliar, imagen);
 		}
 	}
 
-	if (idProceso == 0)
-	{
-		// Si no se han suavizado todas las filas las suavizara el padre
-		int ultimaFilaSuavizada = ((numProcesos - 1) * processRows) + processRows;
-		if (ultimaFilaSuavizada != alto)
-		{
-			for (int i = ultimaFilaSuavizada; i < alto; i++)
-			{
-				for (int j = 0; j < ancho; j++)
-				{
-					suavizar_pixel(i, j, ancho, alto, imagen_auxiliar, imagen);
-				}
-			}
-		}
-
-		// Se Reciben las distintas secciones de los hijos y se transladan a la imagen del master
-		for (int i = 1; i < numProcesos; i++)
-		{
-
-			MPI_Recv(bufferRGB, processRows * ancho, typeRGB, i, 0, MPI_COMM_WORLD, &status);
-
-			for (int j = 0; j < processRows * ancho; j++)
-			{
-				imagen[i * processRows * ancho + j] = bufferRGB[j];
-			}
-		}
-	}
-	else
-	{
-		//enviamos la seccion que hayamos suavizado
-		MPI_Ssend(&imagen[idProceso * processRows * ancho], processRows * ancho, typeRGB, 0, 0, MPI_COMM_WORLD);
-	}
 }

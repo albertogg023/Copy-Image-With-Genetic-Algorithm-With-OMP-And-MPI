@@ -1,20 +1,20 @@
 #ifndef _GA
 #define _GA
 
-#include <mpi.h>
 #include "imagen.h"
 
-
 typedef struct {
+	RGB *imagen;
 	double fitness;
-	RGB imagen[11904];	// tantas posiciones como el numero de pixeles totales de la imagen mas grande que se vaya a utilizar
 } Individuo;
 
-void crear_imagen(const RGB *, int, int, int, int, int, float, RGB *, const char *,
-	int idProceso, int numProcesos, int NGM, int NEM, int NPM,
-	MPI_Datatype individuo_type, MPI_Datatype rgb_type);
+void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alto, int max,
+	int num_generaciones, int tam_poblacion,
+	int num_hilos_ini, int num_hilos_fit,
+	RGB *imagen_resultado, const char *output_file);
+
 void cruzar(Individuo *, Individuo *, Individuo *, Individuo *, int);
 void fitness(const RGB *, Individuo *, int);
-void mutar(Individuo *, int, int, float);
+void mutar(Individuo *, int, int);
 
 #endif

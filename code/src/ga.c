@@ -3,237 +3,178 @@
 #include <stdlib.h>
 #include <string.h>
 #include <assert.h>
-#include <time.h>
 #include <omp.h>
-#include <mpi.h>
+#include <time.h>
 #include "../include/imagen.h"
 #include "../include/ga.h"
 
 #define PRINT 0
+#define PROB_MUTACION 1500 
 
 unsigned int randomSeed;
 #pragma omp threadprivate(randomSeed)
 
-
 static int aleatorio(int max)
 {
-	return (rand_r(&randomSeed) % (max + 1));
+	return (rand_r(&randomSeed) % (max + 1)); // rand_r en lugar de rand puesto que se usa esta funcion en paralelo
 }
+
+
 
 void init_imagen_aleatoria(RGB *imagen, int max, int total)
 {
+//#pragma omp parallel for
 	for (int i = 0; i < total; i++)
 	{
+		//! paralelizable
+		//! schedule
 		imagen[i].r = aleatorio(max);
 		imagen[i].g = aleatorio(max);
 		imagen[i].b = aleatorio(max);
 	}
 }
 
-static int comp_fitness(const void *a, const void *b)
+RGB *imagen_aleatoria(int max, int total)
 {
-	return ((Individuo *)a)->fitness - ((Individuo *)b)->fitness;
+	RGB *imagen = (RGB *)malloc(total * sizeof(RGB));
+	assert(imagen);
+
+	init_imagen_aleatoria(imagen, max, total);
+	return imagen;
 }
 
-void crear_imagen(const RGB *imagen_objetivo, int ancho, int alto, int max, int num_generaciones, int tam_poblacion, float prob_mutacion,
-	RGB *imagen_resultado, const char *output_file,
-	int idProceso, int numProcesos, int NGM, int NEM, int NPM, MPI_Datatype typeIndividuo, MPI_Datatype typeRGB)
-{	
-	// ******************************** INICIO TODOS ********************************************
-	
-	// Variables del algoritmo genetico
+static int comp_fitness(const void *a, const void *b)
+{
+	/* qsort pasa un puntero al elemento que está ordenando */
+	return (*(Individuo **)a)->fitness - (*(Individuo **)b)->fitness;
+}
+
+void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alto, int max, int num_generaciones, int tam_poblacion, int num_hilos_ini, int num_hilos_fit, RGB *imagen_resultado, const char *output_file)
+{
+
 	int i, mutation_start;
 	char output_file2[32];
 	double diferencia_fitness, fitness_anterior, fitness_actual;
-	// Numero total de pixeles de la imagen
-	int num_pixels = ancho*alto;
-	// Tamaño de isla, es decir, la porcion de la poblacion de cada proceso
-	int chunkSize = tam_poblacion/numProcesos;
-	// Población total
-	Individuo *poblacion = NULL;
-	// Isla en la que los procesos hijos recibirán su porción de la población
-	Individuo *islaPoblacion = NULL;
-	// Array en la que cada proceso vuelca sus NEM mejores individuos para recibirlos el padre
-	Individuo *islaPoblacionNEM = NULL;
-	// Array recibe los NEM mejores individos de cada hilo
-	Individuo *poblacionNEM = NULL;
-	// Array para pasar los NPM mejores individuos a todos los hilos
-	Individuo *poblacionNPM = NULL;
-	
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! FIN TODOS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+	/* INicializar srandr*/
 
+	// A. Crear Poblacion Inicial (array de imagenes aleatorias)
+	Individuo **poblacion = (Individuo **)malloc(tam_poblacion * sizeof(Individuo *)); //! PELIGRO PUNTERO A INDIVIDUO
+	assert(poblacion);
 
-	// ******************************** INICIO SOLO EL PADRE ********************************************
-	
-	// ---------------- A. Se inicializa la poblacion y se calcula su fitness inicial -------------------
-	if(idProceso == 0){
-		// Reservamos memoria para un array de arrays que representa la poblacion
-		poblacion = (Individuo *) malloc(tam_poblacion*sizeof(Individuo));
-		assert(poblacion);
+	clock_t t;
+    t = clock();
 
-		poblacionNEM = (Individuo *) malloc(numProcesos*NEM*sizeof(Individuo));
-		assert(poblacionNEM);
-		
-		#pragma omp parallel
+	#pragma omp parallel
+	{
+		randomSeed = omp_get_thread_num() * time(NULL);
+
+		//omp_set_nested(1);
+		#pragma omp for schedule(guided)
+		for (i = 0; i < tam_poblacion; i++)
 		{
-			// Inicializar srandr
-			randomSeed = 47 * time(NULL);
-			//omp_set_nested(1);
-			#pragma omp for schedule(dynamic)
-			for(i = 0; i < tam_poblacion; i++) {
-				init_imagen_aleatoria(poblacion[i].imagen, max, num_pixels);
-				poblacion[i].fitness = 0;
-			}
-			#pragma omp for schedule(dynamic)
-			for(i = 0; i < tam_poblacion; i++) {
-				fitness(imagen_objetivo, &poblacion[i], num_pixels);
-			}
+			poblacion[i] = (Individuo *)malloc(sizeof(Individuo));
+			poblacion[i]->imagen = imagen_aleatoria(max, num_pixels);
+
+			fitness(imagen_objetivo, poblacion[i], num_pixels);
 		}
-		
-        // Ordenar individuos según la función de bondad (menor "fitness" --> más aptos)
-		qsort(poblacion, tam_poblacion, sizeof(Individuo), comp_fitness);		
-		
 	}
+	
+	t = clock() - t;
+    double time_taken = ((double)t)/CLOCKS_PER_SEC; // in seconds
+	printf("Con n_hilos_ini = %d - - - - tarda %d\n", num_hilos_ini, time_taken);
 
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!! FIN SOLO EL PADRE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
 
+	qsort(poblacion, tam_poblacion, sizeof(Individuo *), comp_fitness);
+	// B. Evolucionar la Población (durante un número de generaciones)
+	for (int g = 0; g < num_generaciones; g++)
+	{
+		fitness_anterior = poblacion[0]->fitness;
 
-
-	// ******************************** INICIO TODOS ********************************************
-
-	// Reservamos memoria para porcion de subpoblacion de cada proceso (OJO: tambien se crea en el padre)
-    islaPoblacion = (Individuo *) malloc(chunkSize*sizeof(Individuo));
-	assert(islaPoblacion);
-	islaPoblacionNEM = (Individuo *) malloc(NEM*sizeof(Individuo));
-	assert(islaPoblacionNEM);
-	poblacionNPM = (Individuo *) malloc(NPM*sizeof(Individuo));
-	assert(poblacionNPM);
-
-	// El padre suministra subpoblaciones (de chunkSize) a los hijos
-	MPI_Barrier(MPI_COMM_WORLD);
-	MPI_Scatter(poblacion, chunkSize, typeIndividuo, islaPoblacion, chunkSize, typeIndividuo, 0, MPI_COMM_WORLD);	
-
-	// ---------------- B. Evolucionar la Población (durante un número de generaciones) -------------------
-	for(int idNGM = 0; idNGM < num_generaciones/NGM; idNGM++) {
-		for (int ng = 0; ng < NGM; ng++){
-			fitness_anterior = islaPoblacion[0].fitness;
-
-			// Promocionar a los descendientes de los individuos más aptos
-			for (i = 0; i < (chunkSize / 2) - 1; i += 2){
-				cruzar(&islaPoblacion[i], &islaPoblacion[i + 1], &islaPoblacion[chunkSize / 2 + i], &islaPoblacion[chunkSize / 2 + i + 1], num_pixels);
-			}
-
-			// Mutar una parte de la individuos de la población (se decide que muten tam_poblacion/4)
-			mutation_start = chunkSize / 4;
-
-			for (i = mutation_start; i < chunkSize; i++){
-				mutar(&islaPoblacion[i], max, num_pixels, prob_mutacion);
-			}
-
-			// Recalcular Fitness
-			for (i = 0; i < chunkSize; i++){
-				fitness(imagen_objetivo, &islaPoblacion[i], num_pixels);
-			}
-
-			// Ordenar individuos según la función de bondad (menor "fitness" --> más aptos)
-			qsort(islaPoblacion, chunkSize, sizeof(Individuo), comp_fitness);
-
-			// La mejor solución está en la primera posición del array
-			fitness_actual = islaPoblacion[0].fitness;
-
-			diferencia_fitness = abs(fitness_actual - fitness_anterior);
+		// Promocionar a los descendientes de los individuos más aptos
+		for (i = 0; i < (tam_poblacion / 2) - 1; i += 2)
+		{
+			//! Hay problemas al paralelizar por choques de la poblacion[i] y poblacion[i+1]
+			cruzar(poblacion[i], poblacion[i + 1], poblacion[tam_poblacion / 2 + i], poblacion[tam_poblacion / 2 + i + 1], num_pixels);
 		}
+
+		// Mutar una parte de la individuos de la población (se decide que muten tam_poblacion/4)
+		mutation_start = tam_poblacion / 4;
+
+
+
+		#pragma omp parallel for schedule(guided)
+		for (i = mutation_start; i < tam_poblacion; i++)
+		{
+			mutar(poblacion[i], max, num_pixels);
+		}
+
+		// Recalcular Fitness
+
+		for (i = 0; i < tam_poblacion; i++)
+		{
+			//! paralelizable
+			fitness(imagen_objetivo, poblacion[i], num_pixels);
+		}
+
+		// Ordenar individuos según la función de bondad (menor "fitness" --> más aptos)
 		
-		for(int i=0;i<NEM;i++){
-			islaPoblacionNEM[i]=islaPoblacion[i];
-		}
 
-		MPI_Gather(islaPoblacionNEM, NEM, typeIndividuo, poblacionNEM, NEM, typeIndividuo, 0, MPI_COMM_WORLD);
+		
+		qsort(poblacion, tam_poblacion, sizeof(Individuo *), comp_fitness);
+		// La mejor solución está en la primera posición del array
+		fitness_actual = poblacion[0]->fitness;
 
-		if (idProceso == 0){
-			// Sustituir los NEM*numprocesos peores individuos de poblacion por los mejores NEM individuos de cada proceso
-			int index_poblacion_nem = 0;
-			for (int i = tam_poblacion - 1; i > tam_poblacion - 1 - (numProcesos * NEM); i--)
+		diferencia_fitness = abs(fitness_actual - fitness_anterior);
+
+		// Guardar cada 300 iteraciones para observar el progreso
+		if (PRINT)
+		{
+			printf("Generacion %d - ", g);
+			printf("Fitness = %e - ", fitness_actual);
+			printf("Diferencia con Fitness Anterior = %.2e%c\n", diferencia_fitness, 37);
+			if ((g % 300) == 0)
 			{
-				poblacion[i] = poblacionNEM[index_poblacion_nem];
-				index_poblacion_nem++;
+				printf("%s\n", output_file);
+				sprintf(output_file2, "image_%d.ppm", g);
+				escribir_ppm(output_file2, ancho, alto, max, poblacion[0]->imagen);
 			}
-
-			// Ordenar individuos según la función de bondad (menor "fitness" --> más aptos)
-			qsort(poblacion, tam_poblacion, sizeof(Individuo), comp_fitness);
-
-			for(int i=0;i<NPM;i++){
-				poblacionNPM[i]=poblacion[i];
-			}
-		}
-
-		// Compartimos los datos de la imagen leida a los hijos
-		MPI_Bcast(poblacionNPM,NPM,typeIndividuo,0,MPI_COMM_WORLD);
-
-		qsort(islaPoblacion,chunkSize,sizeof(Individuo),comp_fitness);
-
-		int index_poblacion_npm = 0;
-
-		for (int i = chunkSize - 1; i > chunkSize - 1 - NPM; i--)
-		{
-			islaPoblacion[i] = poblacionNPM[index_poblacion_npm];
-			index_poblacion_npm++;
 		}
 	}
 
-	// Liberamos las porciones de la poblacion de cada proceso
-	free(islaPoblacion);
-	islaPoblacion = NULL;
-	free(islaPoblacionNEM);
-	islaPoblacionNEM = NULL;
-	free(poblacionNPM);
-	poblacionNPM = NULL;
+	// Devuelve Imagen Resultante
+	memmove(imagen_resultado, poblacion[0]->imagen, num_pixels * sizeof(RGB));
 
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!! FIN TODOS !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
-
-
-	// ******************************** INICIO SOLO EL PADRE ********************************************
-
-	MPI_Barrier(MPI_COMM_WORLD);
-	if(idProceso == 0){
-		memmove(imagen_resultado, poblacion[0].imagen, num_pixels * sizeof(RGB));
-		free(poblacionNEM);
-		poblacionNEM= NULL;
-		free(poblacion);	
-		poblacion = NULL;
+	// Release memory
+	for (i = 0; i < tam_poblacion; i++)
+	{
+		//! paralelizable
+		free(poblacion[i]->imagen);
+		free(poblacion[i]);
 	}
-
-	// !!!!!!!!!!!!!!!!!!!!!!!!!!!!!! FIN SOLO EL PADRE !!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!!
-
+	free(poblacion);
 }
 
 void cruzar(Individuo *padre1, Individuo *padre2, Individuo *hijo1, Individuo *hijo2, int num_pixels)
 {
+	// Elegir un "punto" de corte aleatorio a partir del cual se realiza el intercambio de los genes.
+	//  Cruzar los genes de cada padre con su hijo
+	//  Intercambiar los genes de cada hijo con los del otro padre
 
-	//? Generamos un numero aleatorio de entre 0 y el numero total de pixeles para elegir
-	//? el lugar del corte a partir del cual se distribuyen los
+	//?  Generamos un numero aleatorio de entre 0 y el numero total de pixeles para elegir el lugar del corte a partir del cual se distribuyen los
 	//? genes de un padre o del otro
 
-	 int random_number = aleatorio(num_pixels);
-	 		for (int i = 0; i < random_number; i++)
-	 		{
-	 			hijo1->imagen[i] = padre1->imagen[i];
-	 			hijo2->imagen[i] = padre2->imagen[i];
-	 		}
-	 		for (int i = random_number; i < num_pixels; i++)
-	 		{
-	 			hijo1->imagen[i] = padre2->imagen[i];
-	 			hijo2->imagen[i] = padre1->imagen[i];
-	 		}
+	int random_number = aleatorio(num_pixels);
 
-	/* falla #pragma omp parallel sections
+	#pragma omp parallel sections
 	{
 		#pragma omp section
 		{
 			for (int i = 0; i < random_number; i++)
 			{
+
+				//! paralelizable
+
 				hijo1->imagen[i] = padre1->imagen[i];
 
 				hijo2->imagen[i] = padre2->imagen[i];
@@ -243,11 +184,12 @@ void cruzar(Individuo *padre1, Individuo *padre2, Individuo *hijo1, Individuo *h
 		{
 			for (int i = random_number; i < num_pixels; i++)
 			{
+				//! paralelizable
 				hijo1->imagen[i] = padre2->imagen[i];
 				hijo2->imagen[i] = padre1->imagen[i];
 			}
 		}
-	}*/
+	}
 }
 
 void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels)
@@ -257,9 +199,12 @@ void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels)
 
 	double diff = 0.0;
 
+	// TODO ejecutar los 3 por separado
+
 	individuo->fitness = 0;
 
-	// falla #pragma omp parallel for reduction(+: diff)
+
+	//#pragma omp parallel for reduction(+: diff) schedule(guided)
 	for (int i = 0; i < num_pixels; i++)
 	{
 		diff +=abs(objetivo[i].r - individuo->imagen[i].r) + abs(objetivo[i].g - individuo->imagen[i].g) + abs(objetivo[i].b - individuo->imagen[i].b);
@@ -268,12 +213,13 @@ void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels)
 	individuo->fitness=diff;
 }
 
-void mutar(Individuo *actual, int max, int num_pixels, float prob_mutacion)
+void mutar(Individuo *actual, int max, int num_pixels)
 {
-	// falla #pragma omp parallel for schedule(dynamic)
+
+	#pragma omp parallel for schedule(guided)
 	for (int i = 0; i < num_pixels; i++)
 	{
-		if (aleatorio(1500)<= 1)
+		if (aleatorio(PROB_MUTACION)<= 1)
 		{
 			actual->imagen[i].r = aleatorio(max);
 			actual->imagen[i].g = aleatorio(max);

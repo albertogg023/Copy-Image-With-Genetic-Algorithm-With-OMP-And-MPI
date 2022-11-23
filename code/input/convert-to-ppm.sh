@@ -1,1 +1,1 @@
-convert -compress none -resize 128x128 $1 $2
+convert -compress none -resize 1024x1024 $1 $2
