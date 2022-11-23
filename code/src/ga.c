@@ -11,6 +11,13 @@
 #define PRINT 0
 #define PROB_MUTACION 1500 
 
+static double mseconds() {
+	struct timeval t;
+	gettimeofday(&t, NULL);
+	return t.tv_sec*1000 + t.tv_usec/1000;
+}
+
+
 unsigned int randomSeed;
 #pragma omp threadprivate(randomSeed)
 
@@ -62,28 +69,25 @@ void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alt
 	Individuo **poblacion = (Individuo **)malloc(tam_poblacion * sizeof(Individuo *)); //! PELIGRO PUNTERO A INDIVIDUO
 	assert(poblacion);
 
-	clock_t t;
-    t = clock();
-
 	#pragma omp parallel
 	{
 		randomSeed = omp_get_thread_num() * time(NULL);
+	}
 
-		//omp_set_nested(1);
-		#pragma omp for schedule(guided)
-		for (i = 0; i < tam_poblacion; i++)
-		{
-			poblacion[i] = (Individuo *)malloc(sizeof(Individuo));
-			poblacion[i]->imagen = imagen_aleatoria(max, num_pixels);
+	double ti = mseconds();
+	//nested cuando se necesi
+	#pragma omp parallel for num_threads(num_hilos_ini)
+	for (i = 0; i < tam_poblacion; i++)
+	{
+		poblacion[i] = (Individuo *)malloc(sizeof(Individuo));
+		poblacion[i]->imagen = imagen_aleatoria(max, num_pixels);
 
-			fitness(imagen_objetivo, poblacion[i], num_pixels);
-		}
+		fitness(imagen_objetivo, poblacion[i], num_pixels);
 	}
 	
-	t = clock() - t;
-    double time_taken = ((double)t)/CLOCKS_PER_SEC; // in seconds
+	double tf = mseconds();
+    double time_taken = tf - ti;
 	printf("Con n_hilos_ini = %d - - - - tarda %d\n", num_hilos_ini, time_taken);
-
 
 	qsort(poblacion, tam_poblacion, sizeof(Individuo *), comp_fitness);
 	// B. Evolucionar la Población (durante un número de generaciones)
@@ -103,7 +107,7 @@ void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alt
 
 
 
-		#pragma omp parallel for schedule(guided)
+		#pragma omp parallel for
 		for (i = mutation_start; i < tam_poblacion; i++)
 		{
 			mutar(poblacion[i], max, num_pixels);

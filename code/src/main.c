@@ -74,7 +74,6 @@ int main(int argc, char **argv)
 		printf("Execution Time = %.6lf seconds\n", (tf - ti));
 	#endif
 	
-	
 	#ifdef DEBUG
 		// Print Result
 		escribir_ppm(argv[2], ancho, alto, max, mejor_imagen);
