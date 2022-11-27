@@ -75,12 +75,13 @@ void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alt
 		randomSeed = omp_get_thread_num() * time(NULL);
 	}
 	double ti = mseconds();
+	omp_set_nested(1);
 	#pragma omp parallel for num_threads(num_hilos_ini)
 	for (i = 0; i < tam_poblacion; i++)
 	{
 		poblacion[i] = (Individuo *)malloc(sizeof(Individuo));
 		poblacion[i]->imagen = imagen_aleatoria(max, num_pixels);
-		fitness(imagen_objetivo, poblacion[i], num_pixels);
+		fitness(imagen_objetivo, poblacion[i], num_pixels,num_hilos_fit);
 	}
 	
 	double tf = mseconds();
@@ -117,7 +118,7 @@ void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alt
 		for (i = 0; i < tam_poblacion; i++)
 		{
 			//! paralelizable
-			fitness(imagen_objetivo, poblacion[i], num_pixels);
+			fitness(imagen_objetivo, poblacion[i], num_pixels,num_hilos_fit);
 		}
 
 		// Ordenar individuos según la función de bondad (menor "fitness" --> más aptos)
@@ -195,7 +196,7 @@ void cruzar(Individuo *padre1, Individuo *padre2, Individuo *hijo1, Individuo *h
 	}
 }
 
-void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels)
+void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels, int num_hilos_fit)
 {
 	// Determina la calidad del individuo (similitud con el objetivo)
 	// calculando la suma de la distancia existente entre los pixeles
@@ -207,7 +208,7 @@ void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels)
 	individuo->fitness = 0;
 
 
-	//#pragma omp parallel for reduction(+: diff) schedule(guided)
+	#pragma omp parallel for reduction(+: diff) num_threads(num_hilos_fit)
 	for (int i = 0; i < num_pixels; i++)
 	{
 		diff +=abs(objetivo[i].r - individuo->imagen[i].r) + abs(objetivo[i].g - individuo->imagen[i].g) + abs(objetivo[i].b - individuo->imagen[i].b);
@@ -219,7 +220,7 @@ void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels)
 void mutar(Individuo *actual, int max, int num_pixels)
 {
 
-	//#pragma omp parallel for schedule(guided)
+	#pragma omp parallel for schedule(guided)
 	for (int i = 0; i < num_pixels; i++)
 	{
 		if (aleatorio(PROB_MUTACION)<= 1)

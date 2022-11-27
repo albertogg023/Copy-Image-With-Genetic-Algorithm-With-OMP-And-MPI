@@ -14,7 +14,7 @@ void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alt
 	RGB *imagen_resultado, const char *output_file);
 
 void cruzar(Individuo *, Individuo *, Individuo *, Individuo *, int);
-void fitness(const RGB *, Individuo *, int);
+void fitness(const RGB *, Individuo *, int, int);
 void mutar(Individuo *, int, int);
 
 #endif
