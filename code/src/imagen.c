@@ -27,8 +27,6 @@ RGB *leer_ppm(const char *file, int *ancho, int *alto, int *max)
 		printf("%s no es una imagen PPM\n", file);
 		exit(0);
 	}
-	
-	printf("Leyendo fichero PPM %s\n", file);
 	n = fscanf(fd, "%c", &c);
 	while(c == '#') {
 		n = fscanf(fd, "%[^\n] ", b);
@@ -220,7 +218,7 @@ void suavizar(int ancho, int alto, RGB *imagen)
 		imagen_auxiliar[i].b=imagen[i].b;
 	}
 
-	#pragma omp parallel for collapse(2)
+	#pragma omp parallel for
 	for(int i=0;i<alto;i++){
 		for(int j=0;j<ancho;j++){
 			suavizar_pixel(i,j,ancho,alto,imagen_auxiliar, imagen);

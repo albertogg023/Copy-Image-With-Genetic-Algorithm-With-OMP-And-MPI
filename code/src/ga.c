@@ -5,6 +5,7 @@
 #include <assert.h>
 #include <omp.h>
 #include <time.h>
+#include <sys/time.h>
 #include "../include/imagen.h"
 #include "../include/ga.h"
 
@@ -73,21 +74,19 @@ void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alt
 	{
 		randomSeed = omp_get_thread_num() * time(NULL);
 	}
-
 	double ti = mseconds();
-	//nested cuando se necesi
 	#pragma omp parallel for num_threads(num_hilos_ini)
 	for (i = 0; i < tam_poblacion; i++)
 	{
 		poblacion[i] = (Individuo *)malloc(sizeof(Individuo));
 		poblacion[i]->imagen = imagen_aleatoria(max, num_pixels);
-
 		fitness(imagen_objetivo, poblacion[i], num_pixels);
 	}
 	
 	double tf = mseconds();
-    double time_taken = tf - ti;
-	printf("Con n_hilos_ini = %d - - - - tarda %d\n", num_hilos_ini, time_taken);
+    double time_taken = (tf - ti)/1000;
+	printf("%f\n",time_taken);
+	//printf("Con n_hilos_ini = %d - - - - tarda %d\n", num_hilos_ini, time_taken);
 
 	qsort(poblacion, tam_poblacion, sizeof(Individuo *), comp_fitness);
 	// B. Evolucionar la Población (durante un número de generaciones)
@@ -220,7 +219,7 @@ void fitness(const RGB *objetivo, Individuo *individuo, int num_pixels)
 void mutar(Individuo *actual, int max, int num_pixels)
 {
 
-	#pragma omp parallel for schedule(guided)
+	//#pragma omp parallel for schedule(guided)
 	for (int i = 0; i < num_pixels; i++)
 	{
 		if (aleatorio(PROB_MUTACION)<= 1)
