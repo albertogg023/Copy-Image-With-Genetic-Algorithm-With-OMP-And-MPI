@@ -75,7 +75,7 @@ void crear_imagen(const RGB *imagen_objetivo, int num_pixels, int ancho, int alt
 		randomSeed = omp_get_thread_num() * time(NULL);
 	}
 	double ti = mseconds();
-	omp_set_nested(1);
+	omp_set_nested(2);
 	#pragma omp parallel for num_threads(num_hilos_ini)
 	for (i = 0; i < tam_poblacion; i++)
 	{
